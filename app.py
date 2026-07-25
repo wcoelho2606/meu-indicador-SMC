@@ -43,8 +43,9 @@ def obter_vies_institucional_cot(ativo):
 # --- 2. CAPTURA DE VELAS HISTÓRICAS REAIS (YAHOO FINANCE) ---
 @st.cache_data(ttl=60)
 def carregar_velas_historicas_reais(ticker, intervalo):
+    # Puxa uma quantidade menor e ideal de velas para o gráfico abrir com o zoom correto de perto
     if intervalo in ["1m", "2m", "5m", "15m", "30m"]:
-        df = yf.download(ticker, period="5d", interval=intervalo)
+        df = yf.download(ticker, period="2d", interval=intervalo)
     else:
         df = yf.download(ticker, period="1mo", interval=intervalo)
         
@@ -55,9 +56,6 @@ def carregar_velas_historicas_reais(ticker, intervalo):
         df.columns = df.columns.get_level_values(0)
         
     df = df.reset_index()
-    
-    # --- CORREÇÃO TÉCNICA DEFINITIVA DA LINHA 60 ---
-    # Captura estritamente o primeiro nome da coluna de índice cronológico
     coluna_data_real = df.columns[0]
     
     df[coluna_data_real] = pd.to_datetime(df[coluna_data_real]).dt.tz_localize(None)
@@ -87,8 +85,13 @@ mapa_timeframes = {"1 min": "1m", "2 min": "2m", "5 min": "5m", "15 min": "15m",
 timeframe_menu = st.sidebar.selectbox("Tempo Gráfico (Timeframe):", list(mapa_timeframes.keys()))
 intervalo_yf = mapa_timeframes[timeframe_menu]
 
+# ALTERAÇÃO CRÍTICA: Modo de controle de fluxo para não resetar o zoom do usuário
+modo_grafico = st.sidebar.radio(
+    "Modo de Navegação do Gráfico:",
+    ["🟢 Transmissão Ao Vivo (Pulsando)", "🔍 Pausar para Ajustar Zoom / Analisar Histórico"]
+)
+
 velocidade = st.sidebar.slider("Velocidade do Tick (Segundos):", 1, 5, 2)
-travar_grafico = st.sidebar.checkbox("🔒 Congelar Gráfico para Estudo / Zoom", value=False)
 
 st.title(f"📊 Gráfico Vivo Smart Money: {ativo_selecionado} [{timeframe_menu}]")
 
@@ -103,13 +106,18 @@ with col2:
 mapa_tickers = {"EURUSD (Euro)": "EURUSD=X", "XAUUSD (Ouro)": "GC=F", "BTCUSD (Bitcoin)": "BTC-USD"}
 ticker_alvo = mapa_tickers[ativo_selecionado]
 
-historico_real = carregar_velas_historicas_reais(ticker_alvo, intervalo_yf)
+# Salva o histórico base no Session State para persistência do zoom gráfico
+key_estado_velas = f"velas_{ticker_alvo}_{intervalo_yf}"
+if key_estado_velas not in st.session_state:
+    st.session_state[key_estado_velas] = carregar_velas_historicas_reais(ticker_alvo, intervalo_yf)
 
-if not historico_real:
-    st.error("Aguardando resposta do servidor de dados históricos... Tente alterar o Timeframe.")
+historico_dinamico = st.session_state[key_estado_velas]
+
+if not historico_dinamico:
+    st.error("Aguardando resposta do servidor de dados históricos...")
     st.stop()
 
-preco_mercado = historico_real[-1]["close"]
+preco_mercado = historico_dinamico[-1]["close"]
 
 config_ativos = {
     "EURUSD (Euro)": {"distancia_res": 0.0030, "distancia_sup": 0.0040, "decimais": 4},
@@ -123,21 +131,20 @@ pools_liquidez = [
     {"price": round(preco_mercado - conf["distancia_sup"], conf['decimais'])}
 ]
 
-tempo_atualizacao = 3600 if travar_grafico else velocidade
+# Gerencia o tempo do fragmento baseado no botão de rádio lateral
+pausado = "Pausar" in modo_grafico
+tempo_loop = 3600 if pausado else velocidade
 
-if "contador_tick" not in st.session_state:
-    st.session_state.contador_tick = 0
-
-# --- 4. FRAGMENTO DINÂMICO PARA OSCILAÇÃO COM ZOOM ESTABILIZADO ---
-@st.fragment(run_every=tempo_atualizacao)
-def renderizar_grafico_pulsante(velas_base):
-    st.session_state.contador_tick += 1
-    velas = list(velas_base)
+# --- 4. FRAGMENTO DINÂMICO SEM ALTERAÇÃO DE CHAVE ---
+@st.fragment(run_every=tempo_loop)
+def renderizar_grafico_estabilizado():
+    velas = list(historico_dinamico)
     
-    if not travar_grafico:
+    if not pausado:
+        # Altera apenas o valor de fechamento mantendo a estrutura cronológica fixa
         passo = preco_mercado * 0.0001
         segundo_atual = datetime.now().second
-        oscilacao = (passo * 0.4) if segundo_atual % 2 == 0 else -(passo * 0.3)
+        oscilacao = (passo * 0.3) if segundo_atual % 2 == 0 else -(passo * 0.2)
         velas[-1]["close"] += oscilacao
         velas[-1]["high"] = max(velas[-1]["high"], velas[-1]["close"])
         velas[-1]["low"] = min(velas[-1]["low"], velas[-1]["close"])
@@ -172,11 +179,11 @@ def renderizar_grafico_pulsante(velas_base):
         },
         "timeScale": {
             "timeVisible": True,
-            "rightOffset": 12, 
-            "barSpacing": 9,
+            "rightOffset": 10, 
+            "barSpacing": 15, # Zoom inicial de perto configurado de forma fixa
             "fixLeftEdge": False,   
             "fixRightEdge": False,
-            "lockVisibleTimeRangeOnResize": False 
+            "lockVisibleTimeRangeOnResize": True
         },
         "priceScale": {
             "autoScale": True, 
@@ -194,6 +201,7 @@ def renderizar_grafico_pulsante(velas_base):
         tipo_pool = "Liquidez de Venda (Stops)" if pool['price'] > preco_mercado else "Liquidez de Compra (Stops)"
         st.write(f"🔹 Nível detectado em: **{pool['price']:.{conf['decimais']}f}** - Tipo: {tipo_pool}")
         
-    renderLightweightCharts(charts=[meu_painel_grafico], key=f"smc_live_chart_{st.session_state.contador_tick}")
+    # FIX TOTAL: Usando uma chave FIXA para o gráfico não piscar e nem sumir da tela
+    renderLightweightCharts(charts=[meu_painel_grafico], key="SMC_CHART_STABLE_TRADINGVIEW")
 
-renderizar_grafico_pulsante(historico_real)
+renderizar_grafico_estabilizado()
