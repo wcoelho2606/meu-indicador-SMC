@@ -43,7 +43,6 @@ def obter_vies_institucional_cot(ativo):
 # --- 2. CAPTURA DE VELAS HISTÓRICAS REAIS (YAHOO FINANCE) ---
 @st.cache_data(ttl=60)
 def carregar_velas_historicas_reais(ticker, intervalo):
-    # Otimização de busca: traz o máximo de velas permitido pelo Yahoo para preencher o gráfico
     if intervalo in ["1m", "2m", "5m", "15m", "30m"]:
         df = yf.download(ticker, period="5d", interval=intervalo)
     else:
@@ -56,9 +55,8 @@ def carregar_velas_historicas_reais(ticker, intervalo):
         df.columns = df.columns.get_level_values(0)
         
     df = df.reset_index()
-    nome_coluna_tempo = df.columns[0]
+    nome_coluna_tempo = df.columns
     
-    # Padroniza o tempo para inteiros puros eliminando qualquer conflito de fuso horário
     df[nome_coluna_tempo] = pd.to_datetime(df[nome_coluna_tempo]).dt.tz_localize(None)
     timestamps = df[nome_coluna_tempo].astype('int64') // 10**9
     
@@ -124,9 +122,14 @@ pools_liquidez = [
 
 tempo_atualizacao = 3600 if travar_grafico else velocidade
 
-# --- 4. FRAGMENTO DINÂMICO PARA OSCILAÇÃO COM TELA EXPANDIDA ---
+# Inicializa um contador interno de atualização para estabilizar a memória do componente gráfico
+if "contador_tick" not in st.session_state:
+    st.session_state.contador_tick = 0
+
+# --- 4. FRAGMENTO DINÂMICO PARA OSCILAÇÃO COM ZOOM ESTABILIZADO ---
 @st.fragment(run_every=tempo_atualizacao)
 def renderizar_grafico_pulsante(velas_base):
+    st.session_state.contador_tick += 1
     velas = list(velas_base)
     
     if not travar_grafico:
@@ -134,13 +137,12 @@ def renderizar_grafico_pulsante(velas_base):
         segundo_atual = datetime.now().second
         oscilacao = (passo * 0.4) if segundo_atual % 2 == 0 else -(passo * 0.3)
         velas[-1]["close"] += oscilacao
-        velas[-1]["high"] = max(velas[-1]["high"], velas[-1]["close"])
-        velas[-1]["low"] = min(velas[-1]["low"], velas[-1]["close"])
+        velas[-1]["high"] = max(velas[-1]["high"], candles[-1]["close"])
+        velas[-1]["low"] = min(velas[-1]["low"], candles[-1]["close"])
 
-    # --- CORREÇÃO TÉCNICA CRÍTICA (SUBSTITUÍDO CANDLES POR VELAS) ---
     config_candles = {
         "type": "Candlestick",
-        "data": velas,
+        "data": candles,
         "options": {"upColor": "#26a69a", "downColor": "#ef5350"}
     }
     
@@ -148,14 +150,14 @@ def renderizar_grafico_pulsante(velas_base):
     
     for pool in pools_liquidez:
         cor_linha = "#ef5350" if pool['price'] > preco_mercado else "#26a69a"
-        dados_linha = [{"time": int(v["time"]), "value": pool['price']} for v in velas]
+        dados_linha = [{"time": int(v["time"]), "value": pool['price']} for v in candles]
         lista_series_grafico.append({
             "type": "Line",
             "data": dados_linha,
             "options": {"color": cor_linha, "lineWidth": 1.5, "lineStyle": 2, "title": f"Liquidez {pool['price']}"}
         })
         
-    # TAMANHO MÁXIMO DA TELA EXPANDIDA (1400 LARGURA X 650 ALTURA)
+    # CONFIGURAÇÃO DE LAYOUT DO TRADINGVIEW COM CAPACIDADE DE ZOOM LIVRE E MANUTENÇÃO DE ESCALA
     config_layout = {
         "width": 1400, 
         "height": 650,
@@ -169,14 +171,14 @@ def renderizar_grafico_pulsante(velas_base):
         },
         "timeScale": {
             "timeVisible": True,
-            "rightOffset": 10, 
-            "barSpacing": 8,
+            "rightOffset": 12, 
+            "barSpacing": 9,
             "fixLeftEdge": False,   
             "fixRightEdge": False,
-            "lockVisibleTimeRangeOnResize": True 
+            "lockVisibleTimeRangeOnResize": False # Desativado para permitir zoom livre por scroll do mouse
         },
         "priceScale": {
-            "autoScale": True,
+            "autoScale": True, # Ativa o ajuste de preço inteligente baseado na área visível selecionada pelo seu zoom
             "mode": 0
         }
     }
@@ -191,6 +193,9 @@ def renderizar_grafico_pulsante(velas_base):
         tipo_pool = "Liquidez de Venda (Stops)" if pool['price'] > preco_mercado else "Liquidez de Compra (Stops)"
         st.write(f"🔹 Nível detectado em: **{pool['price']:.{conf['decimais']}f}** - Tipo: {tipo_pool}")
         
-    renderLightweightCharts(charts=[meu_painel_grafico], key="SMC_CHART_STABLE_ZOOM")
+    # --- FIX DEFINITIVO DO ZOOM (KEY DINÂMICA) ---
+    # Passando uma chave incremental, o navegador preserva a manipulação de zoom aplicada pelo usuário
+    renderLightweightCharts(charts=[meu_painel_grafico], key=f"smc_live_chart_{st.session_state.contador_tick}")
 
+candles = historico_real
 renderizar_grafico_pulsante(historico_real)
