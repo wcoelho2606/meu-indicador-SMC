@@ -32,7 +32,7 @@ velocidade = st.sidebar.slider("Velocidade do Tick (Segundos):", 1, 5, 2)
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ Indicadores Customizados")
 usar_sma = st.sidebar.checkbox("Média Móvel Simples (SMA 20)", value=True)
-usar_ema = st.sidebar.checkbox("Média Móvel Exponencial (EMA 9)", value=False)
+usar_ema = st.sidebar.checkbox("Média Móvel Exponencial (EMA 9)", value=True)
 
 # --- 2. CAPTURA DOS DADOS INSTITUCIONAIS (COT REPORT) ---
 @st.cache_data(ttl=86400)
@@ -200,11 +200,11 @@ def renderizar_grafico_estabilizado():
         },
         "timeScale": {
             "timeVisible": True,
-            "rightOffset": 10, 
-            "barSpacing": 15,
+            "rightOffset": 5, 
+            "barSpacing": 8,
             "fixLeftEdge": False,   
             "fixRightEdge": False,
-            "lockVisibleTimeRangeOnResize": True
+            "lockVisibleTimeRangeOnResize": False
         }
     }
     
