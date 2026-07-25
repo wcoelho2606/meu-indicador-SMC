@@ -12,11 +12,11 @@ OANDA_URL = f"https://oanda.com" # Ambiente Demo (Practice)
 
 # --- 1. CAPTURA DOS DADOS INSTITUCIONAIS (COT REPORT) ---
 @st.cache_data(ttl=86400) # Guarda os dados por 24h para não travar o app baixando toda hora
-def obter_vies_institucional_cot():
+def obtener_vies_institucional_cot():
     try:
-        ano_atual = datetime.now().year
+        ano_actual = datetime.now().year
         # Baixa o relatório "Traders in Financial Futures" (TFF) do ano atual
-        df_cot = cot.all_reports_by_year(ano_atual, report_type='TFF')
+        df_cot = cot.all_reports_by_year(ano_actual, report_type='TFF')
         
         # Filtra o contrato futuro do Euro FX (base do EURUSD)
         df_euro = df_cot[df_cot['Market_and_Exchange_Names'].str.contains("EURO FX", na=False)]
@@ -43,7 +43,7 @@ def obter_vies_institucional_cot():
         return "COMPRA 🟢 (Simulado - Erro API)", 65.0
 
 # --- 2. CAPTURA DA LIQUIDEZ EM TEMPO REAL (OANDA ORDER BOOK) ---
-def obter_liquidez_oanda():
+def obtener_liquidez_oanda():
     headers = {
         "Authorization": f"Bearer {OANDA_API_KEY}",
         "Content-Type": "application/json"
@@ -86,7 +86,7 @@ st.set_page_config(layout="wide", page_title="SMC Python Dashboard")
 st.title("📊 Painel Quant: Indicador de Liquidez Institucional")
 
 # Busca os dados macro
-vies_macro, porcentagem_long = obter_vies_institucional_cot()
+vies_macro, porcentagem_long = obtener_vies_institucional_cot()
 
 # Exibe os Cards de Informação Institucional no topo
 col1, col2 = st.columns(2)
@@ -96,7 +96,7 @@ with col2:
     st.progress(int(porcentagem_long), text=f"Institucionais Comprados: {porcentagem_long:.1f}%")
 
 # Busca os dados micro de preço e liquidez
-preco_mercado, pools_liquidez = obter_liquidez_oanda()
+preco_mercado, pools_liquidez = obtener_liquidez_oanda()
 
 # Criação de dados de simulação de velas para alimentar o Lightweight Charts
 datas = pd.date_range(end=datetime.now(), periods=50, freq='min').strftime('%Y-%m-%d %H:%M:%S')
@@ -132,5 +132,5 @@ for pool in pools_liquidez:
     tipo_pool = "Liquidez de Venda (Stops)" if pool['price'] > preco_mercado else "Liquidez de Compra (Stops)"
     st.write(f"🔹 Nível detectado em: **{pool['price']:.5f}** - Tipo: {tipo_pool}")
 
-# --- RENDERIZAÇÃO DO GRÁFICO (LINHA CORRIGIDA) ---
-renderLightweightCharts(charts=series_grafico, options=opcoes_grafico)
+# --- RENDERIZAÇÃO DO GRÁFICO ATUALIZADA ---
+renderLightweightCharts(series=series_grafico, options=opcoes_grafico)
