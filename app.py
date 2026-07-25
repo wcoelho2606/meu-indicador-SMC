@@ -7,7 +7,7 @@ from streamlit_lightweight_charts import renderLightweightCharts
 
 # --- 1. CAPTURA DOS DADOS INSTITUCIONAIS (COT REPORT) ---
 @st.cache_data(ttl=86400)
-def obter_vies_institucional_cot(ativo):
+def obtener_vies_institucional_cot(ativo):
     try:
         ano_actual = datetime.now().year
         df_cot = cot.all_reports_by_year(ano_actual, report_type='TFF')
@@ -53,17 +53,14 @@ def carregar_velas_historicas_reais(ticker, intervalo):
     if df.empty:
         return []
         
-    # --- CORREÇÃO TÉCNICA DEFINITIVA DE COLUNAS (LINHA 51-57) ---
-    # Remove as duas camadas de nomes do Yahoo Finance e deixa termos simples ('Open', 'High', etc.)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
         
     df = df.reset_index()
-    coluna_tempo = df.columns[0] # Identifica a coluna de data automática ('Date' ou 'Datetime')
+    coluna_tempo = df.columns[0] # Identifica o eixo cronológico correto
     
     dados_formatados = []
     for _, row in df.iterrows():
-        # Formata a data com segurança técnica
         data_str = pd.to_datetime(row[coluna_tempo]).strftime('%Y-%m-%d %H:%M:%S')
         dados_formatados.append({
             "time": data_str,
@@ -122,7 +119,7 @@ pools_liquidez = [
     {"price": round(preco_mercado - conf["distancia_sup"], conf['decimais'])}
 ]
 
-# --- 4. FRAGMENTO DINÂMICO PARA OSCILAÇÃO ---
+# --- 4. FRAGMENTO DINÂMICO PARA OSCILAÇÃO COM AUTOESCALA ---
 @st.fragment(run_every=velocidade)
 def renderizar_grafico_pulsante(velas_base):
     velas = list(velas_base)
@@ -152,11 +149,27 @@ def renderizar_grafico_pulsante(velas_base):
             "options": {"color": cor_linha, "lineWidth": 1.5, "lineStyle": 2, "title": f"Liquidez {pool['price']}"}
         })
         
+    # --- CONFIGURAÇÃO DE LAYOUT ATUALIZADA COM AUTOESCALA ---
     config_layout = {
-        "width": 1100, "height": 550,
-        "layout": {"background": {"type": "solid", "color": "#131722"}, "textColor": "#d1d4dc"},
-        "grid": {"vertLines": {"color": "#242832"}, "horzLines": {"color": "#242832"}},
-        "timeScale": {"timeVisible": True}
+        "width": 1100, 
+        "height": 550,
+        "layout": {
+            "background": {"type": "solid", "color": "#131722"}, 
+            "textColor": "#d1d4dc"
+        },
+        "grid": {
+            "vertLines": {"color": "#242832"}, 
+            "horzLines": {"color": "#242832"}
+        },
+        "timeScale": {
+            "timeVisible": True,
+            "rightOffset": 5, 
+            "barSpacing": 6   
+        },
+        "priceScale": {
+            "autoScale": True,
+            "mode": 0
+        }
     }
     
     meu_painel_grafico = {
