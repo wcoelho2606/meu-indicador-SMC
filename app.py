@@ -3,6 +3,7 @@ import pandas as pd
 import cot_reports as cot
 import yfinance as yf
 from datetime import datetime
+import time
 from streamlit_lightweight_charts import renderLightweightCharts
 
 from utils.indicators import calcular_sma, calcular_ema
@@ -22,8 +23,10 @@ intervalo_yf = mapa_timeframes[timeframe_menu]
 
 modo_grafico = st.sidebar.radio(
     "Modo de Navegação do Gráfico:",
-    ["🟢 Transmissão Ao Vivo (Pulsando)", "🔍 Pausar / Analisar Histórico e Zoom"]
+    ["🟢 Transmissão Ao Vivo", "▶️ Replay Vela a Vela (Histórico)", "🔍 Pausar / Analisar Zoom"]
 )
+
+velocidade_replay = st.sidebar.slider("Velocidade do Replay (Segundos):", 1, 5, 1)
 
 # --- 1.1 SEÇÃO DE INDICADORES PERSONALIZADOS ---
 st.sidebar.markdown("---")
@@ -31,7 +34,7 @@ st.sidebar.header("⚙️ Indicadores Customizados")
 usar_sma = st.sidebar.checkbox("Média Móvel Simples (SMA 20)", value=True)
 usar_ema = st.sidebar.checkbox("Média Móvel Exponencial (EMA 9)", value=True)
 
-# --- 2. CAPTURA DOS DADOS INSTITUCIONAIS (COT REPORT) ---
+# --- 2. CAPTURA DOS DADOS INSTITUCIONAIS (COT) ---
 @st.cache_data(ttl=86400)
 def obter_vies_institucional_cot(ativo):
     try:
@@ -110,13 +113,30 @@ key_estado_velas = f"velas_{ticker_alvo}_{intervalo_yf}"
 if key_estado_velas not in st.session_state:
     st.session_state[key_estado_velas] = carregar_velas_historicas_reais(ticker_alvo, intervalo_yf)
 
-velas = st.session_state[key_estado_velas]
+historico_total = st.session_state[key_estado_velas]
 
-if not velas:
+if not historico_total:
     st.error("Aguardando resposta do servidor de dados históricos...")
     st.stop()
 
-preco_mercado = velas[-1]["close"]
+# --- LÓGICA DE REPLAY VELA A VELA ---
+key_indice_replay = f"indice_replay_{ticker_alvo}_{intervalo_yf}"
+if key_indice_replay not in st.session_state:
+    st.session_state[key_indice_replay] = len(historico_total) # Começa cheio no ao vivo
+
+if "Replay" in modo_grafico:
+    # No modo replay, se o índice estiver no final, reseta para os primeiros 30% para ver o gráfico construindo
+    if st.session_state[key_indice_replay] >= len(historico_total):
+        st.session_state[key_indice_replay] = max(10, int(len(historico_total) * 0.3))
+    
+    # Corta o array para simular o avanço vela a vela
+    tamanho_atual = st.session_state[key_indice_replay]
+    velas = historico_total[:tamanho_atual]
+else:
+    velas = historico_total
+    st.session_state[key_indice_replay] = len(historico_total)
+
+preco_mercado = velas[-1]["close"] if velas else 0
 
 config_ativos = {
     "EURUSD (Euro)": {"distancia_res": 0.0030, "distancia_sup": 0.0030, "decimais": 4},
@@ -130,7 +150,7 @@ pools_liquidez = [
     {"price": round(preco_mercado - conf["distancia_sup"], conf['decimais']), "tipo": "Suporte / Liquidez de Compra"}
 ]
 
-# --- 4. MONTAGEM DA SÉRIE DO GRÁFICO ---
+# --- MONTAGEM DA SÉRIE DO GRÁFICO ---
 config_candles = {
     "type": "Candlestick",
     "data": velas,
@@ -141,19 +161,21 @@ lista_series_grafico = [config_candles]
 
 if usar_sma:
     dados_sma = calcular_sma(velas, janela=20)
-    lista_series_grafico.append({
-        "type": "Line",
-        "data": dados_sma,
-        "options": {"color": "#2962FF", "lineWidth": 2, "title": "SMA 20"}
-    })
+    if dados_sma:
+        lista_series_grafico.append({
+            "type": "Line",
+            "data": dados_sma,
+            "options": {"color": "#2962FF", "lineWidth": 2, "title": "SMA 20"}
+        })
 
 if usar_ema:
     dados_ema = calcular_ema(velas, janela=9)
-    lista_series_grafico.append({
-        "type": "Line",
-        "data": dados_ema,
-        "options": {"color": "#FF6D00", "lineWidth": 2, "title": "EMA 9"}
-    })
+    if dados_ema:
+        lista_series_grafico.append({
+            "type": "Line",
+            "data": dados_ema,
+            "options": {"color": "#FF6D00", "lineWidth": 2, "title": "EMA 9"}
+        })
 
 for pool in pools_liquidez:
     cor_linha = "#ef5350" if pool['price'] > preco_mercado else "#26a69a"
@@ -164,7 +186,6 @@ for pool in pools_liquidez:
         "options": {"color": cor_linha, "lineWidth": 1.5, "lineStyle": 2, "title": f"Nível: {pool['price']}"}
     })
 
-# Layout configurado para comportamento livre idêntico ao TradingView
 config_layout = {
     "width": 1400, 
     "height": 650,
@@ -183,10 +204,6 @@ config_layout = {
         "fixLeftEdge": False,
         "fixRightEdge": False,
         "lockVisibleTimeRangeOnResize": False
-    },
-    "rightPriceScale": {
-        "visible": True,
-        "autoScale": True
     }
 }
 
@@ -199,12 +216,14 @@ st.subheader("Níveis Mapeados no Histórico:")
 for pool in pools_liquidez:
     st.write(f"🔹 **{pool['tipo']}**: `{pool['price']:.{conf['decimais']}f}`")
 
-# Renderização estável sem fragmento forçado para permitir o zoom livre do usuário
 renderLightweightCharts(charts=[meu_painel_grafico], key="TRADINGVIEW_STABLE_CHART")
 
-# Controle de atualização manual ou pausa
-pausado = "Pausar" in modo_grafico
-if not pausado:
-    import time
+# --- CONTROLE DE FLUXO DE EXECUÇÃO (AO VIVO VS REPLAY) ---
+if "Replay" in modo_grafico:
+    if st.session_state[key_indice_replay] < len(historico_total):
+        time.sleep(velocidade_replay)
+        st.session_state[key_indice_replay] += 1
+        st.rerun()
+elif "Transmissão" in modo_grafico:
     time.sleep(3)
     st.rerun()
