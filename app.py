@@ -99,7 +99,6 @@ with col2:
 preco_mercado, pools_liquidez = obter_liquidez_oanda()
 
 # Criação de dados de simulação de velas para alimentar o Lightweight Charts
-# Na produção, você conecta isso ao loop de tempo real do MT5 mostrado anteriormente
 datas = pd.date_range(end=datetime.now(), periods=50, freq='min').strftime('%Y-%m-%d %H:%M:%S')
 dados_velas = []
 preco_base = preco_mercado
@@ -114,29 +113,24 @@ for index, data in enumerate(datas):
     })
 
 # Configuração Visual do Gráfico (Estilo Dark do TradingView)
-opcoes_grafico = [{
+opcoes_grafico = {
     "width": 1100,
     "height": 500,
     "layout": {"background": {"type": "solid", "color": "#131722"}, "textColor": "#d1d4dc"},
     "grid": {"vertLines": {"color": "#242832"}, "horzLines": {"color": "#242832"}},
     "timeScale": {"timeVisible": True}
-}]
+}
 
 # Define as velas do preço
 series_grafico = [
     {"type": "Candlestick", "data": dados_velas, "options": {"upColor": "#26a69a", "downColor": "#ef5350"}}
 ]
 
-# PASSO CRUCIAL: Adiciona as linhas horizontais de Liquidez da OANDA diretamente no gráfico
+# Exibe a listagem técnica de liquidez
 st.subheader("Pools de Liquidez Identificados no Livro de Ordens:")
 for pool in pools_liquidez:
-    # Se a liquidez está acima do preço, é uma resistência de Stops; se está abaixo, é suporte
     tipo_pool = "Liquidez de Venda (Stops)" if pool['price'] > preco_mercado else "Liquidez de Compra (Stops)"
     st.write(f"🔹 Nível detectado em: **{pool['price']:.5f}** - Tipo: {tipo_pool}")
-    
-    # Desenha uma linha técnica para cada região dentro do gráfico
-    # Nota: No lightweight-charts do Streamlit, podemos mapear linhas de preço como marcadores ou séries extras.
-    # Para fins de simplicidade visual nesta biblioteca, você vê a listagem acima sincronizada com o preço.
 
-# Renderiza o gráfico final na tela do Streamlit
-renderLightweightCharts(series_grafico, opcoes_grafico)
+# --- RENDERIZAÇÃO DO GRÁFICO (LINHA CORRIGIDA) ---
+renderLightweightCharts(charts=series_grafico, options=opcoes_grafico)
