@@ -3,3 +3,4 @@ pandas
 requests
 streamlit-lightweight-charts
 cot-reports
+yfinance
