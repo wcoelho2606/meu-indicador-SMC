@@ -57,12 +57,12 @@ def carregar_velas_historicas_reais(ticker, intervalo):
         df.columns = df.columns.get_level_values(0)
         
     df = df.reset_index()
-    coluna_tempo = df.columns[0]
     
-    # --- CORREÇÃO DEFINITIVA DA LINHA 64 ---
-    # Converte para Datetime sem fuso horário e extrai o timestamp de forma segura
-    df[coluna_tempo] = pd.to_datetime(df[coluna_tempo]).dt.tz_localize(None)
-    timestamps = df[coluna_tempo].view('int64') // 10**9
+    # --- CORREÇÃO TÉCNICA SEGURA DA DATA (LINHA 61-64) ---
+    # Pega apenas o primeiro nome de coluna (o índice cronológico vindo do yfinance)
+    nome_coluna_tempo = df.columns[0]
+    df[nome_coluna_tempo] = pd.to_datetime(df[nome_coluna_tempo]).dt.tz_localize(None)
+    timestamps = df[nome_coluna_tempo].astype('int64') // 10**9
     
     dados_formatados = []
     for idx, row in df.iterrows():
@@ -141,7 +141,7 @@ def renderizar_grafico_pulsante(velas_base):
 
     config_candles = {
         "type": "Candlestick",
-        "data": velas,
+        "data": candles,
         "options": {"upColor": "#26a69a", "downColor": "#ef5350"}
     }
     
@@ -156,7 +156,7 @@ def renderizar_grafico_pulsante(velas_base):
             "options": {"color": cor_linha, "lineWidth": 1.5, "lineStyle": 2, "title": f"Liquidez {pool['price']}"}
         })
         
-    # --- 📐 TELA EXPANDIDA (LARGURA AUMENTADA PARA 1400 E ALTURA PARA 650) ---
+    # TELA ENORME EXPANDIDA
     config_layout = {
         "width": 1400, 
         "height": 650,
