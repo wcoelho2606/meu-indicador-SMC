@@ -45,7 +45,6 @@ def obter_vies_institucional_cot(ativo):
 def carregar_velas_historicas_reais(ticker, intervalo):
     data_inicio = "2026-07-01"
     
-    # Restrição técnica do yfinance para tempos curtos
     if intervalo in ["1m", "2m"]:
         df = yf.download(ticker, period="7d", interval=intervalo)
     else:
@@ -54,16 +53,20 @@ def carregar_velas_historicas_reais(ticker, intervalo):
     if df.empty:
         return []
         
-    # --- CORREÇÃO TÉCNICA DA DATA (LINHA 66) ---
-    # Garante que o índice de tempo vire uma coluna normal de texto limpo
+    # --- CORREÇÃO TÉCNICA DEFINITIVA DE COLUNAS (LINHA 51-57) ---
+    # Remove as duas camadas de nomes do Yahoo Finance e deixa termos simples ('Open', 'High', etc.)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+        
     df = df.reset_index()
-    coluna_tempo = df.columns[0] # Pega sempre a primeira coluna que contém a data/hora
-    df[coluna_tempo] = pd.to_datetime(df[coluna_tempo])
+    coluna_tempo = df.columns[0] # Identifica a coluna de data automática ('Date' ou 'Datetime')
     
     dados_formatados = []
     for _, row in df.iterrows():
+        # Formata a data com segurança técnica
+        data_str = pd.to_datetime(row[coluna_tempo]).strftime('%Y-%m-%d %H:%M:%S')
         dados_formatados.append({
-            "time": row[coluna_tempo].strftime('%Y-%m-%d %H:%M:%S'),
+            "time": data_str,
             "open": float(row['Open']),
             "high": float(row['High']),
             "low": float(row['Low']),
