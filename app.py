@@ -43,12 +43,11 @@ def obter_vies_institucional_cot(ativo):
 # --- 2. CAPTURA DE VELAS HISTÓRICAS REAIS (YAHOO FINANCE) ---
 @st.cache_data(ttl=60)
 def carregar_velas_historicas_reais(ticker, intervalo):
-    data_inicio = "2026-07-01"
-    
-    if intervalo in ["1m", "2m"]:
+    # Otimização de busca: traz o máximo de velas permitido pelo Yahoo para preencher o gráfico
+    if intervalo in ["1m", "2m", "5m", "15m", "30m"]:
         df = yf.download(ticker, period="5d", interval=intervalo)
     else:
-        df = yf.download(ticker, start=data_inicio, interval=intervalo)
+        df = yf.download(ticker, period="1mo", interval=intervalo)
         
     if df.empty:
         return []
@@ -57,10 +56,9 @@ def carregar_velas_historicas_reais(ticker, intervalo):
         df.columns = df.columns.get_level_values(0)
         
     df = df.reset_index()
-    
-    # --- CORREÇÃO TÉCNICA SEGURA DA DATA (LINHA 61-64) ---
-    # Pega apenas o primeiro nome de coluna (o índice cronológico vindo do yfinance)
     nome_coluna_tempo = df.columns[0]
+    
+    # Padroniza o tempo para inteiros puros eliminando qualquer conflito de fuso horário
     df[nome_coluna_tempo] = pd.to_datetime(df[nome_coluna_tempo]).dt.tz_localize(None)
     timestamps = df[nome_coluna_tempo].astype('int64') // 10**9
     
@@ -107,7 +105,7 @@ ticker_alvo = mapa_tickers[ativo_selecionado]
 historico_real = carregar_velas_historicas_reais(ticker_alvo, intervalo_yf)
 
 if not historico_real:
-    st.error("Aguardando resposta do servidor de dados históricos... Tente alterar o Timeframe para 5 min.")
+    st.error("Aguardando resposta do servidor de dados históricos... Tente alterar o Timeframe.")
     st.stop()
 
 preco_mercado = historico_real[-1]["close"]
@@ -126,7 +124,7 @@ pools_liquidez = [
 
 tempo_atualizacao = 3600 if travar_grafico else velocidade
 
-# --- 4. FRAGMENTO DINÂMICO PARA OSCILAÇÃO ---
+# --- 4. FRAGMENTO DINÂMICO PARA OSCILAÇÃO COM TELA EXPANDIDA ---
 @st.fragment(run_every=tempo_atualizacao)
 def renderizar_grafico_pulsante(velas_base):
     velas = list(velas_base)
@@ -139,9 +137,10 @@ def renderizar_grafico_pulsante(velas_base):
         velas[-1]["high"] = max(velas[-1]["high"], velas[-1]["close"])
         velas[-1]["low"] = min(velas[-1]["low"], velas[-1]["close"])
 
+    # --- CORREÇÃO TÉCNICA CRÍTICA (SUBSTITUÍDO CANDLES POR VELAS) ---
     config_candles = {
         "type": "Candlestick",
-        "data": candles,
+        "data": velas,
         "options": {"upColor": "#26a69a", "downColor": "#ef5350"}
     }
     
@@ -156,7 +155,7 @@ def renderizar_grafico_pulsante(velas_base):
             "options": {"color": cor_linha, "lineWidth": 1.5, "lineStyle": 2, "title": f"Liquidez {pool['price']}"}
         })
         
-    # TELA ENORME EXPANDIDA
+    # TAMANHO MÁXIMO DA TELA EXPANDIDA (1400 LARGURA X 650 ALTURA)
     config_layout = {
         "width": 1400, 
         "height": 650,
@@ -170,8 +169,8 @@ def renderizar_grafico_pulsante(velas_base):
         },
         "timeScale": {
             "timeVisible": True,
-            "rightOffset": 5, 
-            "barSpacing": 10,
+            "rightOffset": 10, 
+            "barSpacing": 8,
             "fixLeftEdge": False,   
             "fixRightEdge": False,
             "lockVisibleTimeRangeOnResize": True 
