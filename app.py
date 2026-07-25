@@ -41,12 +41,11 @@ def obter_vies_institucional_cot(ativo):
         return f"{vies} (Dados de Mercado)", p_long
 
 # --- 2. CAPTURA DE VELAS HISTÓRICAS REAIS (YAHOO FINANCE) ---
-@st.cache_data(ttl=60) # Atualiza a carga histórica a cada 1 minuto
+@st.cache_data(ttl=60)
 def carregar_velas_historicas_reais(ticker, intervalo):
-    # Força o carregamento a partir do começo do mês de Julho
     data_inicio = "2026-07-01"
     
-    # Restrição técnica do yfinance: 1m e 2m só guardam os últimos 7 dias na API gratuita
+    # Restrição técnica do yfinance para tempos curtos
     if intervalo in ["1m", "2m"]:
         df = yf.download(ticker, period="7d", interval=intervalo)
     else:
@@ -55,10 +54,11 @@ def carregar_velas_historicas_reais(ticker, intervalo):
     if df.empty:
         return []
         
-    # Formata os dados do Pandas para o padrão aceito pelo Lightweight Charts
+    # --- CORREÇÃO TÉCNICA DA DATA (LINHA 66) ---
+    # Garante que o índice de tempo vire uma coluna normal de texto limpo
     df = df.reset_index()
-    # Identifica o nome da coluna de tempo (varia entre Date e Datetime dependendo do ativo)
-    coluna_tempo = 'Datetime' if 'Datetime' in df.columns else ('Date' if 'Date' in df.columns else df.columns[0])
+    coluna_tempo = df.columns[0] # Pega sempre a primeira coluna que contém a data/hora
+    df[coluna_tempo] = pd.to_datetime(df[coluna_tempo])
     
     dados_formatados = []
     for _, row in df.iterrows():
@@ -80,7 +80,6 @@ ativo_selecionado = st.sidebar.selectbox(
     ["EURUSD (Euro)", "XAUUSD (Ouro)", "BTCUSD (Bitcoin)"]
 )
 
-# Mapeamento técnico de nomes de timeframes para a API do Yahoo
 mapa_timeframes = {"1 min": "1m", "2 min": "2m", "5 min": "5m", "15 min": "15m", "30 min": "30m"}
 timeframe_menu = st.sidebar.selectbox("Tempo Gráfico (Timeframe):", list(mapa_timeframes.keys()))
 intervalo_yf = mapa_timeframes[timeframe_menu]
@@ -97,18 +96,15 @@ with col1:
 with col2:
     st.progress(int(porcentagem_long), text=f"Institucionais Comprados: {porcentagem_long:.1f}%")
 
-# Definições de tickers correspondentes no Yahoo Finance
 mapa_tickers = {"EURUSD (Euro)": "EURUSD=X", "XAUUSD (Ouro)": "GC=F", "BTCUSD (Bitcoin)": "BTC-USD"}
 ticker_alvo = mapa_tickers[ativo_selecionado]
 
-# Carrega o histórico real completo a partir de 01/Julho
 historico_real = carregar_velas_historicas_reais(ticker_alvo, intervalo_yf)
 
-if not list(historico_real):
-    st.error("Aguardando resposta do servidor de dados históricos... Tente alterar o Timeframe.")
+if not historico_real:
+    st.error("Aguardando resposta do servidor de dados históricos... Tente alterar o Timeframe para 5 min.")
     st.stop()
 
-# Pega o preço de fechamento mais recente para traçar a liquidez base proporcional
 preco_mercado = historico_real[-1]["close"]
 
 config_ativos = {
@@ -123,33 +119,30 @@ pools_liquidez = [
     {"price": round(preco_mercado - conf["distancia_sup"], conf['decimais'])}
 ]
 
-# --- 4. FRAGMENTO DINÂMICO PARA OSCILAÇÃO EM TEMPO REAL ---
+# --- 4. FRAGMENTO DINÂMICO PARA OSCILAÇÃO ---
 @st.fragment(run_every=velocidade)
 def renderizar_grafico_pulsante(velas_base):
-    # Faz uma cópia para evitar alterar o cache global de forma errada
     velas = list(velas_base)
     passo = preco_mercado * 0.0001
     
     segundo_atual = datetime.now().second
     oscilacao = (passo * 0.4) if segundo_atual % 2 == 0 else -(passo * 0.3)
     
-    # Atualiza o tick dinâmico na ponta atual do mercado real
     velas[-1]["close"] += oscilacao
     velas[-1]["high"] = max(velas[-1]["high"], velas[-1]["close"])
     velas[-1]["low"] = min(velas[-1]["low"], velas[-1]["close"])
 
     config_candles = {
         "type": "Candlestick",
-        "data": candles,
+        "data": velas,
         "options": {"upColor": "#26a69a", "downColor": "#ef5350"}
     }
     
     lista_series_grafico = [config_candles]
     
-    # Renderiza as linhas estendidas por todo o histórico desde o início do mês
     for pool in pools_liquidez:
         cor_linha = "#ef5350" if pool['price'] > preco_mercado else "#26a69a"
-        dados_linha = [{"time": v["time"], "value": pool['price']} for v in candles]
+        dados_linha = [{"time": v["time"], "value": pool['price']} for v in velas]
         lista_series_grafico.append({
             "type": "Line",
             "data": dados_linha,
@@ -173,8 +166,6 @@ def renderizar_grafico_pulsante(velas_base):
         tipo_pool = "Liquidez de Venda (Stops)" if pool['price'] > preco_mercado else "Liquidez de Compra (Stops)"
         st.write(f"🔹 Nível detectado em: **{pool['price']:.{conf['decimais']}f}** - Tipo: {tipo_pool}")
         
-    renderLightweightCharts(charts=[meu_painel_grafico], key="SMC_CHART_REAL_HIST")
+    renderLightweightCharts(charts=[meu_painel_grafico], key="SMC_CHART_REAL_FINAL")
 
-# Ativa a renderização passando as velas históricas reais carregadas
-candles = historico_real
-renderizer_grafico_pulsante(historico_real)
+renderizar_grafico_pulsante(historico_real)
