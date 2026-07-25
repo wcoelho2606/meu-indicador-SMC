@@ -7,7 +7,7 @@ from streamlit_lightweight_charts import renderLightweightCharts
 
 # --- 1. CAPTURA DOS DADOS INSTITUCIONAIS (COT REPORT) ---
 @st.cache_data(ttl=86400)
-def obtener_vies_institucional_cot(ativo):
+def obter_vies_institucional_cot(ativo):
     try:
         ano_actual = datetime.now().year
         df_cot = cot.all_reports_by_year(ano_actual, report_type='TFF')
@@ -57,7 +57,7 @@ def carregar_velas_historicas_reais(ticker, intervalo):
         df.columns = df.columns.get_level_values(0)
         
     df = df.reset_index()
-    coluna_tempo = df.columns[0] # Identifica o eixo cronológico correto
+    coluna_tempo = df.columns[0] # Pega dinamicamente a primeira coluna que contém as datas
     
     dados_formatados = []
     for _, row in df.iterrows():
@@ -88,6 +88,7 @@ velocidade = st.sidebar.slider("Velocidade do Tick (Segundos):", 1, 5, 2)
 
 st.title(f"📊 Gráfico Vivo Smart Money: {ativo_selecionado} [{timeframe_menu}]")
 
+# CORREÇÃO NOMINAL DA FUNÇÃO NA LINHA 91
 vies_macro, porcentagem_long = obter_vies_institucional_cot(ativo_selecionado)
 
 col1, col2 = st.columns(2)
@@ -149,7 +150,6 @@ def renderizar_grafico_pulsante(velas_base):
             "options": {"color": cor_linha, "lineWidth": 1.5, "lineStyle": 2, "title": f"Liquidez {pool['price']}"}
         })
         
-    # --- CONFIGURAÇÃO DE LAYOUT ATUALIZADA COM AUTOESCALA ---
     config_layout = {
         "width": 1100, 
         "height": 550,
