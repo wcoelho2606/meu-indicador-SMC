@@ -112,25 +112,46 @@ for index, data in enumerate(datas):
         "close": preco_base
     })
 
-# Configuração Visual do Gráfico (Estilo Dark do TradingView)
-opcoes_grafico = {
-    "width": 1100,
-    "height": 500,
-    "layout": {"background": {"type": "solid", "color": "#131722"}, "textColor": "#d1d4dc"},
-    "grid": {"vertLines": {"color": "#242832"}, "horzLines": {"color": "#242832"}},
-    "timeScale": {"timeVisible": True}
+# --- AJUSTE DA ESTRUTURA PARA A NOVA VERSÃO DA BIBLIOTECA ---
+
+# 1. Configuração do Gráfico de Velas (Candlestick)
+config_candles = {
+    "type": "Candlestick",
+    "data": dados_velas,
+    "options": {
+        "upColor": "#26a69a", 
+        "downColor": "#ef5350"
+    }
 }
 
-# Define as velas do preço
-series_grafico = [
-    {"type": "Candlestick", "data": dados_velas, "options": {"upColor": "#26a69a", "downColor": "#ef5350"}}
-]
+# 2. Configurações Globais de Layout do Painel
+config_layout = {
+    "width": 1100,
+    "height": 500,
+    "layout": {
+        "background": {"type": "solid", "color": "#131722"}, 
+        "textColor": "#d1d4dc"
+    },
+    "grid": {
+        "vertLines": {"color": "#242832"}, 
+        "horzLines": {"color": "#242832"}
+    },
+    "timeScale": {
+        "timeVisible": True
+    }
+}
 
-# Exibe a listagem técnica de liquidez
+# 3. Organização dos dados no formato de Dicionário que a nuvem exige hoje
+meu_painel_grafico = {
+    "series": [config_candles],
+    "options": config_layout
+}
+
+# Exibe a listagem técnica de liquidez na tela
 st.subheader("Pools de Liquidez Identificados no Livro de Ordens:")
 for pool in pools_liquidez:
     tipo_pool = "Liquidez de Venda (Stops)" if pool['price'] > preco_mercado else "Liquidez de Compra (Stops)"
     st.write(f"🔹 Nível detectado em: **{pool['price']:.5f}** - Tipo: {tipo_pool}")
 
-# --- RENDERIZAÇÃO DO GRÁFICO ATUALIZADA ---
-renderLightweightCharts(series=series_grafico, options=opcoes_grafico)
+# --- RENDERIZAÇÃO FINAL ATUALIZADA ---
+renderLightweightCharts(charts=[meu_painel_grafico])
