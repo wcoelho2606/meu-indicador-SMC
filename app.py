@@ -45,8 +45,9 @@ def obter_vies_institucional_cot(ativo):
 def carregar_velas_historicas_reais(ticker, intervalo):
     data_inicio = "2026-07-01"
     
+    # Se for 1m ou 2m, pegamos os últimos 5 dias para encher o gráfico de velas
     if intervalo in ["1m", "2m"]:
-        df = yf.download(ticker, period="7d", interval=intervalo)
+        df = yf.download(ticker, period="5d", interval=intervalo)
     else:
         df = yf.download(ticker, start=data_inicio, interval=intervalo)
         
@@ -57,7 +58,7 @@ def carregar_velas_historicas_reais(ticker, intervalo):
         df.columns = df.columns.get_level_values(0)
         
     df = df.reset_index()
-    coluna_tempo = df.columns[0] # Pega dinamicamente a primeira coluna que contém as datas
+    coluna_tempo = df.columns[0]
     
     dados_formatados = []
     for _, row in df.iterrows():
@@ -88,7 +89,6 @@ velocidade = st.sidebar.slider("Velocidade do Tick (Segundos):", 1, 5, 2)
 
 st.title(f"📊 Gráfico Vivo Smart Money: {ativo_selecionado} [{timeframe_menu}]")
 
-# CORREÇÃO NOMINAL DA FUNÇÃO NA LINHA 91
 vies_macro, porcentagem_long = obter_vies_institucional_cot(ativo_selecionado)
 
 col1, col2 = st.columns(2)
@@ -120,7 +120,7 @@ pools_liquidez = [
     {"price": round(preco_mercado - conf["distancia_sup"], conf['decimais'])}
 ]
 
-# --- 4. FRAGMENTO DINÂMICO PARA OSCILAÇÃO COM AUTOESCALA ---
+# --- 4. FRAGMENTO DINÂMICO PARA OSCILAÇÃO COM AJUSTE DE VISÃO ---
 @st.fragment(run_every=velocidade)
 def renderizar_grafico_pulsante(velas_base):
     velas = list(velas_base)
@@ -150,6 +150,7 @@ def renderizar_grafico_pulsante(velas_base):
             "options": {"color": cor_linha, "lineWidth": 1.5, "lineStyle": 2, "title": f"Liquidez {pool['price']}"}
         })
         
+    # FIX DE VISÃO: Ajusta barSpacing para espalhar as velas na tela preta
     config_layout = {
         "width": 1100, 
         "height": 550,
@@ -163,8 +164,8 @@ def renderizar_grafico_pulsante(velas_base):
         },
         "timeScale": {
             "timeVisible": True,
-            "rightOffset": 5, 
-            "barSpacing": 6   
+            "rightOffset": 15, 
+            "barSpacing": 12 # Aumentado de 6 para 12 para esticar as velas horizontalmente
         },
         "priceScale": {
             "autoScale": True,
