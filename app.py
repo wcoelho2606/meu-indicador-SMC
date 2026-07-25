@@ -67,11 +67,12 @@ def obter_vies_institucional_cot(ativo):
         vies = "COMPRA 🟢" if p_long > 60 else "NEUTRO 🟡"
         return f"{vies} (Dados de Mercado)", p_long
 
-# --- 3. CAPTURA DE VELAS HISTÓRICAS ---
+# --- 3. CAPTURA DE VELAS HISTÓRICAS REAIS ---
 @st.cache_data(ttl=60)
 def carregar_velas_historicas_reais(ticker, intervalo):
-    if intervalo in ["1m", "2m", "5m", "15m", "30m"]:
-        df = yf.download(ticker, period="2d", interval=intervalo, progress=False)
+    # Pega um período adequado para garantir massa de dados para as médias móveis
+    if intervalo in ["1m", "2m", "5m"]:
+        df = yf.download(ticker, period="5d", interval=intervalo, progress=False)
     else:
         df = yf.download(ticker, period="1mo", interval=intervalo, progress=False)
         
@@ -83,18 +84,35 @@ def carregar_velas_historicas_reais(ticker, intervalo):
         
     df = df.reset_index()
     coluna_data_real = df.columns[0]
-    df[coluna_data_real] = pd.to_datetime(df[coluna_data_real]).dt.tz_localize(None)
+    
+    # Tratamento robusto de datas e fusos horários para o Lightweight Charts
+    df[coluna_data_real] = pd.to_datetime(df[coluna_data_real])
+    if df[coluna_data_real].dt.tz is not None:
+        df[coluna_data_real] = df[coluna_data_real].dt.tz_convert('UTC').dt.tz_localize(None)
+    else:
+        df[coluna_data_real] = df[coluna_data_real].dt.tz_localize(None)
+        
     timestamps = df[coluna_data_real].astype('int64') // 10**9
     
     dados_formatados = []
     for idx, row in df.iterrows():
-        dados_formatados.append({
-            "time": int(timestamps.iloc[idx]),
-            "open": float(row['Open']),
-            "high": float(row['High']),
-            "low": float(row['Low']),
-            "close": float(row['Close'])
-        })
+        try:
+            o = float(row['Open'])
+            h = float(row['High'])
+            l = float(row['Low'])
+            c = float(row['Close'])
+            t = int(timestamps.iloc[idx])
+            if pd.notna(o) and pd.notna(h) and pd.notna(l) and pd.notna(c):
+                dados_formatados.append({
+                    "time": t,
+                    "open": o,
+                    "high": h,
+                    "low": l,
+                    "close": c
+                })
+        except Exception:
+            continue
+            
     return dados_formatados
 
 st.title(f"📊 Gráfico Smart Money (Estilo TradingView): {ativo_selecionado} [{timeframe_menu}]")
@@ -122,14 +140,11 @@ if not historico_total:
 # --- LÓGICA DE REPLAY VELA A VELA ---
 key_indice_replay = f"indice_replay_{ticker_alvo}_{intervalo_yf}"
 if key_indice_replay not in st.session_state:
-    st.session_state[key_indice_replay] = len(historico_total) # Começa cheio no ao vivo
+    st.session_state[key_indice_replay] = len(historico_total)
 
 if "Replay" in modo_grafico:
-    # No modo replay, se o índice estiver no final, reseta para os primeiros 30% para ver o gráfico construindo
     if st.session_state[key_indice_replay] >= len(historico_total):
-        st.session_state[key_indice_replay] = max(10, int(len(historico_total) * 0.3))
-    
-    # Corta o array para simular o avanço vela a vela
+        st.session_state[key_indice_replay] = max(30, int(len(historico_total) * 0.2))
     tamanho_atual = st.session_state[key_indice_replay]
     velas = historico_total[:tamanho_atual]
 else:
@@ -150,11 +165,17 @@ pools_liquidez = [
     {"price": round(preco_mercado - conf["distancia_sup"], conf['decimais']), "tipo": "Suporte / Liquidez de Compra"}
 ]
 
-# --- MONTAGEM DA SÉRIE DO GRÁFICO ---
+# --- MONTAGEM DA SÉRIE DO GRÁFICO ESTILO TRADINGVIEW ---
 config_candles = {
     "type": "Candlestick",
     "data": velas,
-    "options": {"upColor": "#26a69a", "downColor": "#ef5350"}
+    "options": {
+        "upColor": "#26a69a", 
+        "downColor": "#ef5350",
+        "borderVisible": False,
+        "wickUpColor": "#26a69a",
+        "wickDownColor": "#ef5350"
+    }
 }
 
 lista_series_grafico = [config_candles]
@@ -194,13 +215,14 @@ config_layout = {
         "textColor": "#d1d4dc"
     },
     "grid": {
-        "vertLines": {"color": "#242832"}, 
-        "horzLines": {"color": "#242832"}
+        "vertLines": {"color": "#1f293d"}, 
+        "horzLines": {"color": "#1f293d"}
     },
     "timeScale": {
         "timeVisible": True,
+        "secondsVisible": False,
         "rightOffset": 12,
-        "barSpacing": 10,
+        "barSpacing": 6,  # Espaçamento ideal para as velas aparecerem preenchendo a tela
         "fixLeftEdge": False,
         "fixRightEdge": False,
         "lockVisibleTimeRangeOnResize": False
@@ -216,9 +238,9 @@ st.subheader("Níveis Mapeados no Histórico:")
 for pool in pools_liquidez:
     st.write(f"🔹 **{pool['tipo']}**: `{pool['price']:.{conf['decimais']}f}`")
 
-renderLightweightCharts(charts=[meu_painel_grafico], key="TRADINGVIEW_STABLE_CHART")
+renderLightweightCharts(charts=[meu_painel_grafico], key="TRADINGVIEW_STABLE_CHART_V2")
 
-# --- CONTROLE DE FLUXO DE EXECUÇÃO (AO VIVO VS REPLAY) ---
+# --- CONTROLE DE REPLAY E AO VIVO ---
 if "Replay" in modo_grafico:
     if st.session_state[key_indice_replay] < len(historico_total):
         time.sleep(velocidade_replay)
