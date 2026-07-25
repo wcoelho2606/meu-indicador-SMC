@@ -1,5 +1,5 @@
-streamlit
+streamlit>=1.35.0
 pandas
 requests
-streamlit-lightweight-charts
+streamlit-lightweight-charts==0.1.2
 cot-reports
