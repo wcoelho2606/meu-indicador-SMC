@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import cot_reports as cot
+import yfinance as yf
 from datetime import datetime
 from streamlit_lightweight_charts import renderLightweightCharts
 
@@ -39,102 +40,116 @@ def obter_vies_institucional_cot(ativo):
         vies = "COMPRA 🟢" if p_long > 60 else "NEUTRO 🟡"
         return f"{vies} (Dados de Mercado)", p_long
 
-# --- 2. CONFIGURAÇÃO DA INTERFACE ---
+# --- 2. CAPTURA DE VELAS HISTÓRICAS REAIS (YAHOO FINANCE) ---
+@st.cache_data(ttl=60) # Atualiza a carga histórica a cada 1 minuto
+def carregar_velas_historicas_reais(ticker, intervalo):
+    # Força o carregamento a partir do começo do mês de Julho
+    data_inicio = "2026-07-01"
+    
+    # Restrição técnica do yfinance: 1m e 2m só guardam os últimos 7 dias na API gratuita
+    if intervalo in ["1m", "2m"]:
+        df = yf.download(ticker, period="7d", interval=intervalo)
+    else:
+        df = yf.download(ticker, start=data_inicio, interval=intervalo)
+        
+    if df.empty:
+        return []
+        
+    # Formata os dados do Pandas para o padrão aceito pelo Lightweight Charts
+    df = df.reset_index()
+    # Identifica o nome da coluna de tempo (varia entre Date e Datetime dependendo do ativo)
+    coluna_tempo = 'Datetime' if 'Datetime' in df.columns else ('Date' if 'Date' in df.columns else df.columns[0])
+    
+    dados_formatados = []
+    for _, row in df.iterrows():
+        dados_formatados.append({
+            "time": row[coluna_tempo].strftime('%Y-%m-%d %H:%M:%S'),
+            "open": float(row['Open']),
+            "high": float(row['High']),
+            "low": float(row['Low']),
+            "close": float(row['Close'])
+        })
+    return dados_formatados
+
+# --- 3. CONFIGURAÇÃO DA INTERFACE ---
 st.set_page_config(layout="wide", page_title="SMC Live Dashboard")
 
-# CONFIGURAÇÕES DO MENU LATERAL
 st.sidebar.header("🕹️ Painel de Controle")
 ativo_selecionado = st.sidebar.selectbox(
     "Escolha o Ativo:",
     ["EURUSD (Euro)", "XAUUSD (Ouro)", "BTCUSD (Bitcoin)"]
 )
 
-timeframe = st.sidebar.selectbox(
-    "Tempo Gráfico (Timeframe):",
-    ["1 min", "2 min", "5 min", "15 min", "30 min"]
-)
+# Mapeamento técnico de nomes de timeframes para a API do Yahoo
+mapa_timeframes = {"1 min": "1m", "2 min": "2m", "5 min": "5m", "15 min": "15m", "30 min": "30m"}
+timeframe_menu = st.sidebar.selectbox("Tempo Gráfico (Timeframe):", list(mapa_timeframes.keys()))
+intervalo_yf = mapa_timeframes[timeframe_menu]
 
 velocidade = st.sidebar.slider("Velocidade do Tick (Segundos):", 1, 5, 2)
 
-st.title(f"📊 Gráfico Vivo Smart Money: {ativo_selecionado} [{timeframe}]")
+st.title(f"📊 Gráfico Vivo Smart Money: {ativo_selecionado} [{timeframe_menu}]")
 
 vies_macro, porcentagem_long = obter_vies_institucional_cot(ativo_selecionado)
 
-# Exibe as métricas de contratos de fundos
 col1, col2 = st.columns(2)
 with col1:
     st.metric(label="Viés Macro das Instituições (COT)", value=vies_macro)
 with col2:
     st.progress(int(porcentagem_long), text=f"Institucionais Comprados: {porcentagem_long:.1f}%")
 
-# Parâmetros de volatilidade para gerar as variações de velas
-config_ativos = {
-    "EURUSD (Euro)": {"preco_base": 1.0920, "distancia_res": 0.0030, "distancia_sup": 0.0040, "decimais": 4},
-    "XAUUSD (Ouro)": {"preco_base": 2420.50, "distancia_res": 25.00, "distancia_sup": 35.00, "decimais": 2},
-    "BTCUSD (Bitcoin)": {"preco_base": 64500.00, "distancia_res": 1200.00, "distancia_sup": 1500.00, "decimais": 2}
-}
+# Definições de tickers correspondentes no Yahoo Finance
+mapa_tickers = {"EURUSD (Euro)": "EURUSD=X", "XAUUSD (Ouro)": "GC=F", "BTCUSD (Bitcoin)": "BTC-USD"}
+ticker_alvo = mapa_tickers[ativo_selecionado]
 
+# Carrega o histórico real completo a partir de 01/Julho
+historico_real = carregar_velas_historicas_reais(ticker_alvo, intervalo_yf)
+
+if not list(historico_real):
+    st.error("Aguardando resposta do servidor de dados históricos... Tente alterar o Timeframe.")
+    st.stop()
+
+# Pega o preço de fechamento mais recente para traçar a liquidez base proporcional
+preco_mercado = historico_real[-1]["close"]
+
+config_ativos = {
+    "EURUSD (Euro)": {"distancia_res": 0.0030, "distancia_sup": 0.0040, "decimais": 4},
+    "XAUUSD (Ouro)": {"distancia_res": 25.00, "distancia_sup": 35.00, "decimais": 2},
+    "BTCUSD (Bitcoin)": {"distancia_res": 1200.00, "distancia_sup": 1500.00, "decimais": 2}
+}
 conf = config_ativos[ativo_selecionado]
-preco_mercado = conf["preco_base"]
 
 pools_liquidez = [
     {"price": round(preco_mercado + conf["distancia_res"], conf['decimais'])},
     {"price": round(preco_mercado - conf["distancia_sup"], conf['decimais'])}
 ]
 
-# Inicializa o histórico estático de velas no estado da página (Session State) para não resetar
-if "historico_velas" not in st.session_state or st.get_option("client.showErrorDetails"):
-    datas = pd.date_range(end=datetime.now(), periods=50, freq='min').strftime('%Y-%m-%d %H:%M:%S')
-    dados_velas = []
-    preco_base = preco_mercado
-    passo_preco = conf["preco_base"] * 0.00015
-    for index, data in enumerate(datas):
-        preco_base += passo_preco if index % 2 == 0 else -passo_preco
-        dados_velas.append({
-            "time": data, "open": preco_base - (passo_preco * 0.2), "high": preco_base + (passo_preco * 0.5),
-            "low": preco_base - (passo_preco * 0.6), "close": preco_base
-        })
-    st.session_state.historico_velas = dados_velas
-
-# --- 3. FRAGMENTO DINÂMICO PARA FLUXO DE PREÇO REALTIME ---
-# st.fragment faz com que apenas este bloco rode repetidamente sem dar crash no gráfico
+# --- 4. FRAGMENTO DINÂMICO PARA OSCILAÇÃO EM TEMPO REAL ---
 @st.fragment(run_every=velocidade)
-def renderizar_grafico_pulsante():
-    velas = st.session_state.historico_velas
-    passo = conf["preco_base"] * 0.00015
+def renderizar_grafico_pulsante(velas_base):
+    # Faz uma cópia para evitar alterar o cache global de forma errada
+    velas = list(velas_base)
+    passo = preco_mercado * 0.0001
     
-    # Gera um leve balanço de preço a cada atualização simulando ticks reais de mercado
     segundo_atual = datetime.now().second
-    oscilacao = (passo * 0.5) if segundo_atual % 2 == 0 else -(passo * 0.4)
+    oscilacao = (passo * 0.4) if segundo_atual % 2 == 0 else -(passo * 0.3)
     
+    # Atualiza o tick dinâmico na ponta atual do mercado real
     velas[-1]["close"] += oscilacao
     velas[-1]["high"] = max(velas[-1]["high"], velas[-1]["close"])
     velas[-1]["low"] = min(velas[-1]["low"], velas[-1]["close"])
-    
-    # Adiciona uma nova vela na lista se o tempo passar (simulação vela a vela)
-    if segundo_atual == 0 or segundo_atual == 30:
-        nova_data = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        velas.append({
-            "time": nova_data, "open": velas[-1]["close"], "high": velas[-1]["close"],
-            "low": velas[-1]["close"], "close": velas[-1]["close"]
-        })
-        # Mantém o gráfico leve limitando a 50 velas na tela
-        if len(velas) > 50:
-            velas.pop(0)
 
-    # Configura e envia as séries modificadas ao painel visual
     config_candles = {
         "type": "Candlestick",
-        "data": velas,
+        "data": candles,
         "options": {"upColor": "#26a69a", "downColor": "#ef5350"}
     }
     
     lista_series_grafico = [config_candles]
     
-    # Insere as linhas de liquidez travadas nos alvos institucionais
+    # Renderiza as linhas estendidas por todo o histórico desde o início do mês
     for pool in pools_liquidez:
         cor_linha = "#ef5350" if pool['price'] > preco_mercado else "#26a69a"
-        dados_linha = [{"time": v["time"], "value": pool['price']} for v in velas]
+        dados_linha = [{"time": v["time"], "value": pool['price']} for v in candles]
         lista_series_grafico.append({
             "type": "Line",
             "data": dados_linha,
@@ -153,14 +168,13 @@ def renderizar_grafico_pulsante():
         "options": config_layout
     }
     
-    # Mostra a listagem de texto
-    st.subheader("Pools de Liquidez Mapeados:")
+    st.subheader("Pools de Liquidez Mapeados no Histórico:")
     for pool in pools_liquidez:
         tipo_pool = "Liquidez de Venda (Stops)" if pool['price'] > preco_mercado else "Liquidez de Compra (Stops)"
         st.write(f"🔹 Nível detectado em: **{pool['price']:.{conf['decimais']}f}** - Tipo: {tipo_pool}")
         
-    # Renderiza o gráfico vivo de forma estável
-    renderLightweightCharts(charts=[meu_painel_grafico], key="SMC_CHART_STABLE")
+    renderLightweightCharts(charts=[meu_painel_grafico], key="SMC_CHART_REAL_HIST")
 
-# Executa o fragmento vivo na tela
-renderizar_grafico_pulsante()
+# Ativa a renderização passando as velas históricas reais carregadas
+candles = historico_real
+renderizer_grafico_pulsante(historico_real)
