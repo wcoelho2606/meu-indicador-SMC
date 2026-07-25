@@ -5,7 +5,36 @@ import yfinance as yf
 from datetime import datetime
 from streamlit_lightweight_charts import renderLightweightCharts
 
-# --- 1. CAPTURA DOS DADOS INSTITUCIONAIS (COT REPORT) ---
+# Importação do módulo de indicadores personalizados criado na pasta utils/
+from utils.indicators import calcular_sma, calcular_ema
+
+# --- 1. CONFIGURAÇÃO DA INTERFACE ---
+st.set_page_config(layout="wide", page_title="SMC Live Dashboard - Forex & Crypto")
+
+st.sidebar.header("🕹️ Painel de Controle")
+ativo_selecionado = st.sidebar.selectbox(
+    "Escolha o Ativo:",
+    ["EURUSD (Euro)", "XAUUSD (Ouro)", "BTCUSD (Bitcoin)"]
+)
+
+mapa_timeframes = {"1 min": "1m", "2 min": "2m", "5 min": "5m", "15 min": "15m", "30 min": "30m"}
+timeframe_menu = st.sidebar.selectbox("Tempo Gráfico (Timeframe):", list(mapa_timeframes.keys()))
+intervalo_yf = mapa_timeframes[timeframe_menu]
+
+modo_grafico = st.sidebar.radio(
+    "Modo de Navegação do Gráfico:",
+    ["🟢 Transmissão Ao Vivo (Pulsando)", "🔍 Pausar para Ajustar Zoom / Analisar Histórico"]
+)
+
+velocidade = st.sidebar.slider("Velocidade do Tick (Segundos):", 1, 5, 2)
+
+# --- 1.1 SEÇÃO DE INDICADORES PERSONALIZADOS ---
+st.sidebar.markdown("---")
+st.sidebar.header("⚙️ Indicadores Customizados")
+usar_sma = st.sidebar.checkbox("Média Móvel Simples (SMA 20)", value=True)
+usar_ema = st.sidebar.checkbox("Média Móvel Exponencial (EMA 9)", value=False)
+
+# --- 2. CAPTURA DOS DADOS INSTITUCIONAIS (COT REPORT) ---
 @st.cache_data(ttl=86400)
 def obter_vies_institucional_cot(ativo):
     try:
@@ -34,20 +63,19 @@ def obter_vies_institucional_cot(ativo):
             return "VENDA 🔴 (Bearish)", percentual_long
         else:
             return "NEUTRO 🟡", percentual_long
-    except Exception as e:
+    except Exception:
         fallbacks = {"EURUSD (Euro)": 65.0, "XAUUSD (Ouro)": 58.0, "BTCUSD (Bitcoin)": 72.0}
         p_long = fallbacks.get(ativo, 50.0)
         vies = "COMPRA 🟢" if p_long > 60 else "NEUTRO 🟡"
         return f"{vies} (Dados de Mercado)", p_long
 
-# --- 2. CAPTURA DE VELAS HISTÓRICAS REAIS (YAHOO FINANCE) ---
+# --- 3. CAPTURA DE VELAS HISTÓRICAS REAIS ---
 @st.cache_data(ttl=60)
 def carregar_velas_historicas_reais(ticker, intervalo):
-    # Puxa uma quantidade menor e ideal de velas para o gráfico abrir com o zoom correto de perto
     if intervalo in ["1m", "2m", "5m", "15m", "30m"]:
-        df = yf.download(ticker, period="2d", interval=intervalo)
+        df = yf.download(ticker, period="2d", interval=intervalo, progress=False)
     else:
-        df = yf.download(ticker, period="1mo", interval=intervalo)
+        df = yf.download(ticker, period="1mo", interval=intervalo, progress=False)
         
     if df.empty:
         return []
@@ -72,27 +100,6 @@ def carregar_velas_historicas_reais(ticker, intervalo):
         })
     return dados_formatados
 
-# --- 3. CONFIGURAÇÃO DA INTERFACE ---
-st.set_page_config(layout="wide", page_title="SMC Live Dashboard")
-
-st.sidebar.header("🕹️ Painel de Controle")
-ativo_selecionado = st.sidebar.selectbox(
-    "Escolha o Ativo:",
-    ["EURUSD (Euro)", "XAUUSD (Ouro)", "BTCUSD (Bitcoin)"]
-)
-
-mapa_timeframes = {"1 min": "1m", "2 min": "2m", "5 min": "5m", "15 min": "15m", "30 min": "30m"}
-timeframe_menu = st.sidebar.selectbox("Tempo Gráfico (Timeframe):", list(mapa_timeframes.keys()))
-intervalo_yf = mapa_timeframes[timeframe_menu]
-
-# ALTERAÇÃO CRÍTICA: Modo de controle de fluxo para não resetar o zoom do usuário
-modo_grafico = st.sidebar.radio(
-    "Modo de Navegação do Gráfico:",
-    ["🟢 Transmissão Ao Vivo (Pulsando)", "🔍 Pausar para Ajustar Zoom / Analisar Histórico"]
-)
-
-velocidade = st.sidebar.slider("Velocidade do Tick (Segundos):", 1, 5, 2)
-
 st.title(f"📊 Gráfico Vivo Smart Money: {ativo_selecionado} [{timeframe_menu}]")
 
 vies_macro, porcentagem_long = obter_vies_institucional_cot(ativo_selecionado)
@@ -106,7 +113,6 @@ with col2:
 mapa_tickers = {"EURUSD (Euro)": "EURUSD=X", "XAUUSD (Ouro)": "GC=F", "BTCUSD (Bitcoin)": "BTC-USD"}
 ticker_alvo = mapa_tickers[ativo_selecionado]
 
-# Salva o histórico base no Session State para persistência do zoom gráfico
 key_estado_velas = f"velas_{ticker_alvo}_{intervalo_yf}"
 if key_estado_velas not in st.session_state:
     st.session_state[key_estado_velas] = carregar_velas_historicas_reais(ticker_alvo, intervalo_yf)
@@ -120,28 +126,25 @@ if not historico_dinamico:
 preco_mercado = historico_dinamico[-1]["close"]
 
 config_ativos = {
-    "EURUSD (Euro)": {"distancia_res": 0.0030, "distancia_sup": 0.0040, "decimais": 4},
-    "XAUUSD (Ouro)": {"distancia_res": 25.00, "distancia_sup": 35.00, "decimais": 2},
-    "BTCUSD (Bitcoin)": {"distancia_res": 1200.00, "distancia_sup": 1500.00, "decimais": 2}
+    "EURUSD (Euro)": {"distancia_res": 0.0030, "distancia_sup": 0.0030, "decimais": 4},
+    "XAUUSD (Ouro)": {"distancia_res": 25.00, "distancia_sup": 25.00, "decimais": 2},
+    "BTCUSD (Bitcoin)": {"distancia_res": 1200.00, "distancia_sup": 1200.00, "decimais": 2}
 }
 conf = config_ativos[ativo_selecionado]
 
 pools_liquidez = [
-    {"price": round(preco_mercado + conf["distancia_res"], conf['decimais'])},
-    {"price": round(preco_mercado - conf["distancia_sup"], conf['decimais'])}
+    {"price": round(preco_mercado + conf["distancia_res"], conf['decimais']), "tipo": "Resistência / Liquidez de Venda"},
+    {"price": round(preco_mercado - conf["distancia_sup"], conf['decimais']), "tipo": "Suporte / Liquidez de Compra"}
 ]
 
-# Gerencia o tempo do fragmento baseado no botão de rádio lateral
 pausado = "Pausar" in modo_grafico
 tempo_loop = 3600 if pausado else velocidade
 
-# --- 4. FRAGMENTO DINÂMICO SEM ALTERAÇÃO DE CHAVE ---
 @st.fragment(run_every=tempo_loop)
 def renderizar_grafico_estabilizado():
     velas = list(historico_dinamico)
     
     if not pausado:
-        # Altera apenas o valor de fechamento mantendo a estrutura cronológica fixa
         passo = preco_mercado * 0.0001
         segundo_atual = datetime.now().second
         oscilacao = (passo * 0.3) if segundo_atual % 2 == 0 else -(passo * 0.2)
@@ -157,13 +160,31 @@ def renderizar_grafico_estabilizado():
     
     lista_series_grafico = [config_candles]
     
+    # Inserção da SMA 20 usando o módulo separado
+    if usar_sma:
+        dados_sma = calcular_sma(velas, janela=20)
+        lista_series_grafico.append({
+            "type": "Line",
+            "data": dados_sma,
+            "options": {"color": "#2962FF", "lineWidth": 2, "title": "SMA 20"}
+        })
+
+    # Inserção da EMA 9 usando o módulo separado
+    if usar_ema:
+        dados_ema = calcular_ema(velas, janela=9)
+        lista_series_grafico.append({
+            "type": "Line",
+            "data": dados_ema,
+            "options": {"color": "#FF6D00", "lineWidth": 2, "title": "EMA 9"}
+        })
+    
     for pool in pools_liquidez:
         cor_linha = "#ef5350" if pool['price'] > preco_mercado else "#26a69a"
         dados_linha = [{"time": int(v["time"]), "value": pool['price']} for v in velas]
         lista_series_grafico.append({
             "type": "Line",
             "data": dados_linha,
-            "options": {"color": cor_linha, "lineWidth": 1.5, "lineStyle": 2, "title": f"Liquidez {pool['price']}"}
+            "options": {"color": cor_linha, "lineWidth": 1.5, "lineStyle": 2, "title": f"Nível: {pool['price']}"}
         })
         
     config_layout = {
@@ -180,14 +201,10 @@ def renderizar_grafico_estabilizado():
         "timeScale": {
             "timeVisible": True,
             "rightOffset": 10, 
-            "barSpacing": 15, # Zoom inicial de perto configurado de forma fixa
+            "barSpacing": 15,
             "fixLeftEdge": False,   
             "fixRightEdge": False,
             "lockVisibleTimeRangeOnResize": True
-        },
-        "priceScale": {
-            "autoScale": True, 
-            "mode": 0
         }
     }
     
@@ -196,12 +213,10 @@ def renderizar_grafico_estabilizado():
         "options": config_layout
     }
     
-    st.subheader("Pools de Liquidez Mapeados no Histórico:")
+    st.subheader("Níveis Mapeados no Histórico:")
     for pool in pools_liquidez:
-        tipo_pool = "Liquidez de Venda (Stops)" if pool['price'] > preco_mercado else "Liquidez de Compra (Stops)"
-        st.write(f"🔹 Nível detectado em: **{pool['price']:.{conf['decimais']}f}** - Tipo: {tipo_pool}")
+        st.write(f"🔹 **{pool['tipo']}**: `{pool['price']:.{conf['decimais']}f}`")
         
-    # FIX TOTAL: Usando uma chave FIXA para o gráfico não piscar e nem sumir da tela
     renderLightweightCharts(charts=[meu_painel_grafico], key="SMC_CHART_STABLE_TRADINGVIEW")
 
 renderizar_grafico_estabilizado()
