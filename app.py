@@ -45,7 +45,6 @@ def obter_vies_institucional_cot(ativo):
 def carregar_velas_historicas_reais(ticker, intervalo):
     data_inicio = "2026-07-01"
     
-    # Se for 1m ou 2m, pegamos os últimos 5 dias para encher o gráfico de velas
     if intervalo in ["1m", "2m"]:
         df = yf.download(ticker, period="5d", interval=intervalo)
     else:
@@ -62,9 +61,10 @@ def carregar_velas_historicas_reais(ticker, intervalo):
     
     dados_formatados = []
     for _, row in df.iterrows():
-        data_str = pd.to_datetime(row[coluna_tempo]).strftime('%Y-%m-%d %H:%M:%S')
+        # --- CORREÇÃO DE TIMEZONE: Transforma a data em um número inteiro (Timestamp UNIX) ---
+        timestamp_unix = int(pd.to_datetime(row[coluna_tempo]).timestamp())
         dados_formatados.append({
-            "time": data_str,
+            "time": timestamp_unix,
             "open": float(row['Open']),
             "high": float(row['High']),
             "low": float(row['Low']),
@@ -120,7 +120,7 @@ pools_liquidez = [
     {"price": round(preco_mercado - conf["distancia_sup"], conf['decimais'])}
 ]
 
-# --- 4. FRAGMENTO DINÂMICO PARA OSCILAÇÃO COM AJUSTE DE VISÃO ---
+# --- 4. FRAGMENTO DINÂMICO PARA OSCILAÇÃO CORRIGIDA ---
 @st.fragment(run_every=velocidade)
 def renderizar_grafico_pulsante(velas_base):
     velas = list(velas_base)
@@ -150,7 +150,6 @@ def renderizar_grafico_pulsante(velas_base):
             "options": {"color": cor_linha, "lineWidth": 1.5, "lineStyle": 2, "title": f"Liquidez {pool['price']}"}
         })
         
-    # FIX DE VISÃO: Ajusta barSpacing para espalhar as velas na tela preta
     config_layout = {
         "width": 1100, 
         "height": 550,
@@ -164,8 +163,8 @@ def renderizar_grafico_pulsante(velas_base):
         },
         "timeScale": {
             "timeVisible": True,
-            "rightOffset": 15, 
-            "barSpacing": 12 # Aumentado de 6 para 12 para esticar as velas horizontalmente
+            "rightOffset": 5, 
+            "barSpacing": 10   
         },
         "priceScale": {
             "autoScale": True,
@@ -183,6 +182,6 @@ def renderizar_grafico_pulsante(velas_base):
         tipo_pool = "Liquidez de Venda (Stops)" if pool['price'] > preco_mercado else "Liquidez de Compra (Stops)"
         st.write(f"🔹 Nível detectado em: **{pool['price']:.{conf['decimais']}f}** - Tipo: {tipo_pool}")
         
-    renderLightweightCharts(charts=[meu_painel_grafico], key="SMC_CHART_REAL_FINAL")
+    renderLightweightCharts(charts=[meu_painel_grafico], key="SMC_CHART_FINAL_FIXED")
 
 renderizar_grafico_pulsante(historico_real)
