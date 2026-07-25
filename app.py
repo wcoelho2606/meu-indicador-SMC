@@ -55,10 +55,13 @@ def carregar_velas_historicas_reais(ticker, intervalo):
         df.columns = df.columns.get_level_values(0)
         
     df = df.reset_index()
-    nome_coluna_tempo = df.columns
     
-    df[nome_coluna_tempo] = pd.to_datetime(df[nome_coluna_tempo]).dt.tz_localize(None)
-    timestamps = df[nome_coluna_tempo].astype('int64') // 10**9
+    # --- CORREÇÃO TÉCNICA DEFINITIVA DA LINHA 60 ---
+    # Captura estritamente o primeiro nome da coluna de índice cronológico
+    coluna_data_real = df.columns[0]
+    
+    df[coluna_data_real] = pd.to_datetime(df[coluna_data_real]).dt.tz_localize(None)
+    timestamps = df[coluna_data_real].astype('int64') // 10**9
     
     dados_formatados = []
     for idx, row in df.iterrows():
@@ -122,7 +125,6 @@ pools_liquidez = [
 
 tempo_atualizacao = 3600 if travar_grafico else velocidade
 
-# Inicializa um contador interno de atualização para estabilizar a memória do componente gráfico
 if "contador_tick" not in st.session_state:
     st.session_state.contador_tick = 0
 
@@ -137,12 +139,12 @@ def renderizar_grafico_pulsante(velas_base):
         segundo_atual = datetime.now().second
         oscilacao = (passo * 0.4) if segundo_atual % 2 == 0 else -(passo * 0.3)
         velas[-1]["close"] += oscilacao
-        velas[-1]["high"] = max(velas[-1]["high"], candles[-1]["close"])
-        velas[-1]["low"] = min(velas[-1]["low"], candles[-1]["close"])
+        velas[-1]["high"] = max(velas[-1]["high"], velas[-1]["close"])
+        velas[-1]["low"] = min(velas[-1]["low"], velas[-1]["close"])
 
     config_candles = {
         "type": "Candlestick",
-        "data": candles,
+        "data": velas,
         "options": {"upColor": "#26a69a", "downColor": "#ef5350"}
     }
     
@@ -150,14 +152,13 @@ def renderizar_grafico_pulsante(velas_base):
     
     for pool in pools_liquidez:
         cor_linha = "#ef5350" if pool['price'] > preco_mercado else "#26a69a"
-        dados_linha = [{"time": int(v["time"]), "value": pool['price']} for v in candles]
+        dados_linha = [{"time": int(v["time"]), "value": pool['price']} for v in velas]
         lista_series_grafico.append({
             "type": "Line",
             "data": dados_linha,
             "options": {"color": cor_linha, "lineWidth": 1.5, "lineStyle": 2, "title": f"Liquidez {pool['price']}"}
         })
         
-    # CONFIGURAÇÃO DE LAYOUT DO TRADINGVIEW COM CAPACIDADE DE ZOOM LIVRE E MANUTENÇÃO DE ESCALA
     config_layout = {
         "width": 1400, 
         "height": 650,
@@ -175,10 +176,10 @@ def renderizar_grafico_pulsante(velas_base):
             "barSpacing": 9,
             "fixLeftEdge": False,   
             "fixRightEdge": False,
-            "lockVisibleTimeRangeOnResize": False # Desativado para permitir zoom livre por scroll do mouse
+            "lockVisibleTimeRangeOnResize": False 
         },
         "priceScale": {
-            "autoScale": True, # Ativa o ajuste de preço inteligente baseado na área visível selecionada pelo seu zoom
+            "autoScale": True, 
             "mode": 0
         }
     }
@@ -193,9 +194,6 @@ def renderizar_grafico_pulsante(velas_base):
         tipo_pool = "Liquidez de Venda (Stops)" if pool['price'] > preco_mercado else "Liquidez de Compra (Stops)"
         st.write(f"🔹 Nível detectado em: **{pool['price']:.{conf['decimais']}f}** - Tipo: {tipo_pool}")
         
-    # --- FIX DEFINITIVO DO ZOOM (KEY DINÂMICA) ---
-    # Passando uma chave incremental, o navegador preserva a manipulação de zoom aplicada pelo usuário
     renderLightweightCharts(charts=[meu_painel_grafico], key=f"smc_live_chart_{st.session_state.contador_tick}")
 
-candles = historico_real
 renderizar_grafico_pulsante(historico_real)
