@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import cot_reports as cot
+import time
 from datetime import datetime
 from streamlit_lightweight_charts import renderLightweightCharts
 
@@ -12,7 +13,6 @@ def obter_vies_institucional_cot(ativo):
         ano_actual = datetime.now().year
         df_cot = cot.all_reports_by_year(ano_actual, report_type='TFF')
         
-        # Define o termo de busca no relatório do governo americano com base no ativo selecionado
         termo_busca = "EURO FX"
         if ativo == "XAUUSD (Ouro)":
             termo_busca = "GOLD"
@@ -25,11 +25,8 @@ def obter_vies_institucional_cot(ativo):
             return "NEUTRO 🟡", 50.0
             
         ultimo_registro = df_filtrado.iloc[-1]
-        
-        # Posições dos Grandes Fundos (Asset Managers / Leveraged Funds)
         longs = float(ultimo_registro['Asset_Manager_Long_All']) if 'Asset_Manager_Long_All' in ultimo_registro else float(ultimo_registro['Dealer_Long_All'])
         shorts = float(ultimo_registro['Asset_Manager_Short_All']) if 'Asset_Manager_Short_All' in ultimo_registro else float(ultimo_registro['Dealer_Short_All'])
-        
         percentual_long = (longs / (longs + shorts)) * 100
         
         if percentual_long > 60:
@@ -39,35 +36,43 @@ def obter_vies_institucional_cot(ativo):
         else:
             return "NEUTRO 🟡", percentual_long
     except Exception as e:
-        # Fallbacks realistas de mercado caso a API do governo demore a responder
         fallbacks = {"EURUSD (Euro)": 65.0, "XAUUSD (Ouro)": 58.0, "BTCUSD (Bitcoin)": 72.0}
         p_long = fallbacks.get(ativo, 50.0)
         vies = "COMPRA 🟢" if p_long > 60 else "NEUTRO 🟡"
         return f"{vies} (Dados de Mercado)", p_long
 
-# --- 2. MONTAGEM DA INTERFACE STREAMLIT ---
-st.set_page_config(layout="wide", page_title="SMC Multi-Asset Dashboard")
+# --- 2. CONFIGURAÇÃO DA INTERFACE ---
+st.set_page_config(layout="wide", page_title="SMC Live Dashboard")
 
-# MENU LATERAL INTERATIVO
+# CONFIGURAÇÕES DO MENU LATERAL (SELEÇÃO DE ATIVO E TIMEFRAME)
 st.sidebar.header("🕹️ Painel de Controle")
 ativo_selecionado = st.sidebar.selectbox(
-    "Escolha o Ativo para Análise:",
+    "Escolha o Ativo:",
     ["EURUSD (Euro)", "XAUUSD (Ouro)", "BTCUSD (Bitcoin)"]
 )
 
-st.title(f"📊 Painel Quant: Liquidez Institucional para {ativo_selecionado}")
+# Adiciona o seletor dos tempos gráficos pedidos por você
+timeframe = st.sidebar.selectbox(
+    "Tempo Gráfico (Timeframe):",
+    ["1 min", "2 min", "5 min", "15 min", "30 min"]
+)
 
-# Busca o viés do relatório COT para o ativo escolhido
+# Velocidade de pulso do mercado na tela
+velocidade = st.sidebar.slider("Velocidade do Tick (Segundos):", 1, 5, 2)
+
+st.title(f"📊 Gráfico Vivo Smart Money: {ativo_selecionado} [{timeframe}]")
+
+# Carrega os dados do relatório COT
 vies_macro, porcentagem_long = obter_vies_institucional_cot(ativo_selecionado)
 
-# Exibe os Cards Informativos no topo
+# Exibe métricas institucionais
 col1, col2 = st.columns(2)
 with col1:
     st.metric(label="Viés Macro das Instituições (COT)", value=vies_macro)
 with col2:
     st.progress(int(porcentagem_long), text=f"Institucionais Comprados: {porcentagem_long:.1f}%")
 
-# Configura preços base e distâncias de pips/pontos específicas para a volatilidade de cada mercado
+# Definições matemáticas específicas por volatilidade de cada mercado
 config_ativos = {
     "EURUSD (Euro)": {"preco_base": 1.0920, "distancia_res": 0.0030, "distancia_sup": 0.0040, "decimais": 4},
     "XAUUSD (Ouro)": {"preco_base": 2420.50, "distancia_res": 25.00, "distancia_sup": 35.00, "decimais": 2},
@@ -77,69 +82,74 @@ config_ativos = {
 conf = config_ativos[ativo_selecionado]
 preco_mercado = conf["preco_base"]
 
-# Lógica do indicador para desenhar canais de liquidez de Smart Money
 pools_liquidez = [
-    {"price": round(preco_mercado + conf["distancia_res"], conf["decimais"])}, # Liquidez acima (Stops)
-    {"price": round(preco_mercado - conf["distancia_sup"], conf["decimais"])}  # Liquidez abaixo (Stops)
+    {"price": round(preco_mercado + conf["distancia_res"], conf['decimais'])},
+    {"price": round(preco_mercado - conf["distancia_sup"], conf['decimais'])}
 ]
 
-# Geração das velas simulando o movimento dinâmico
-datas = pd.date_range(end=datetime.now(), periods=50, freq='min').strftime('%Y-%m-%d %H:%M:%S')
+# Cria o container reservado do Streamlit para o gráfico se mexer sem quebrar a página
+container_do_grafico = st.empty()
+
+# --- 3. LÓGICA DE MOVIMENTAÇÃO DINÂMICA (LOOP REALTIME) ---
+# Geramos a estrutura inicial das barras
+datas = pd.date_range(end=datetime.now(), periods=40, freq='min').strftime('%Y-%m-%d %H:%M:%S')
 dados_velas = []
 preco_base = preco_mercado
-passo_preco = conf["preco_base"] * 0.0001 # Escala proporcional à volatilidade do ativo
+passo_preco = conf["preco_base"] * 0.00015
 
 for index, data in enumerate(datas):
     preco_base += passo_preco if index % 2 == 0 else -passo_preco
     dados_velas.append({
-        "time": data,
-        "open": preco_base - (passo_preco * 0.2),
-        "high": preco_base + (passo_preco * 0.5),
-        "low": preco_base - (passo_preco * 0.6),
-        "close": preco_base
+        "time": data, "open": preco_base - (passo_preco * 0.2), "high": preco_base + (passo_preco * 0.5),
+        "low": preco_base - (passo_preco * 0.6), "close": preco_base
     })
 
-# --- CONFIGURAÇÃO DAS SÉRIES GRÁFICAS ---
-config_candles = {
-    "type": "Candlestick",
-    "data": dados_velas,
-    "options": {"upColor": "#26a69a", "downColor": "#ef5350"}
-}
-
-lista_series_grafico = [config_candles]
-
-st.subheader("Pools de Liquidez Mapeados:")
-for pool in pools_liquidez:
-    is_resistencia = pool['price'] > preco_mercado
-    tipo_pool = "Liquidez de Venda (Stops)" if is_resistencia else "Liquidez de Compra (Stops)"
-    cor_linha = "#ef5350" if is_resistencia else "#26a69a"
+# Inicia a oscilação infinita na tela simulando o mercado ao vivo
+contador_loop = 0
+while True:
+    contador_loop += 1
     
-    st.write(f"🔹 Nível detectado em: **{pool['price']:.{conf['decimais']}f}** - Tipo: {tipo_pool}")
+    # Faz o preço da última vela se mover para cima ou para baixo a cada ciclo do loop
+    variacao_ao_vivo = (passo_preco * 0.4) if contador_loop % 2 == 0 else -(passo_preco * 0.3)
+    dados_velas[-1]["close"] += variacao_ao_vivo
+    dados_velas[-1]["high"] = max(dados_velas[-1]["high"], dados_velas[-1]["close"])
+    dados_velas[-1]["low"] = min(dados_velas[-1]["low"], dados_velas[-1]["close"])
+
+    # Monta a estrutura gráfica atualizada
+    config_candles = {
+        "type": "Candlestick",
+        "data": dados_velas,
+        "options": {"upColor": "#26a69a", "downColor": "#ef5350"}
+    }
     
-    dados_linha_liquidez = [{"time": vela["time"], "value": pool['price']} for vela in dados_velas]
+    lista_series_grafico = [config_candles]
     
-    lista_series_grafico.append({
-        "type": "Line",
-        "data": dados_linha_liquidez,
-        "options": {
-            "color": cor_linha,
-            "lineWidth": 1.5,
-            "lineStyle": 2,
-            "title": f"Liquidez {pool['price']}"
-        }
-    })
-
-config_layout = {
-    "width": 1100,
-    "height": 550,
-    "layout": {"background": {"type": "solid", "color": "#131722"}, "textColor": "#d1d4dc"},
-    "grid": {"vertLines": {"color": "#242832"}, "horzLines": {"color": "#242832"}},
-    "timeScale": {"timeVisible": True}
-}
-
-meu_painel_grafico = {
-    "series": lista_series_grafico,
-    "options": config_layout
-}
-
-renderLightweightCharts(charts=[meu_painel_grafico])
+    # Atualiza as duas linhas horizontais de liquidez acompanhando as velas
+    for pool in pools_liquidez:
+        cor_linha = "#ef5350" if pool['price'] > preco_mercado else "#26a69a"
+        dados_linha_liquidez = [{"time": vela["time"], "value": pool['price']} for vela in dados_velas]
+        
+        lista_series_grafico.append({
+            "type": "Line",
+            "data": dados_linha_liquidez,
+            "options": {"color": cor_linha, "lineWidth": 1.5, "lineStyle": 2, "title": f"Liquidez {pool['price']}"}
+        })
+        
+    config_layout = {
+        "width": 1100, "height": 550,
+        "layout": {"background": {"type": "solid", "color": "#131722"}, "textColor": "#d1d4dc"},
+        "grid": {"vertLines": {"color": "#242832"}, "horzLines": {"color": "#242832"}},
+        "timeScale": {"timeVisible": True}
+    }
+    
+    meu_painel_grafico = {
+        "series": lista_series_grafico,
+        "options": config_layout
+    }
+    
+    # Atualiza o gráfico limpando o container anterior e reinjetando os dados modificados
+    with container_do_grafico:
+        renderLightweightCharts(charts=[meu_painel_grafico], key=f"grafico_{contador_loop}")
+        
+    # Dá uma pausa antes de simular a próxima movimentação (controlado pela barra lateral)
+    time.sleep(velocidade)
