@@ -57,11 +57,10 @@ def carregar_velas_historicas_reais(ticker, intervalo):
         df.columns = df.columns.get_level_values(0)
         
     df = df.reset_index()
-    coluna_tempo = df.columns[0]
+    coluna_tempo = df.columns
     
     dados_formatados = []
     for _, row in df.iterrows():
-        # --- CORREÇÃO DE TIMEZONE: Transforma a data em um número inteiro (Timestamp UNIX) ---
         timestamp_unix = int(pd.to_datetime(row[coluna_tempo]).timestamp())
         dados_formatados.append({
             "time": timestamp_unix,
@@ -86,6 +85,10 @@ timeframe_menu = st.sidebar.selectbox("Tempo Gráfico (Timeframe):", list(mapa_t
 intervalo_yf = mapa_timeframes[timeframe_menu]
 
 velocidade = st.sidebar.slider("Velocidade do Tick (Segundos):", 1, 5, 2)
+
+# --- BOTÃO DE TRAVA DE ZOOM ---
+# Se ativado, congela o loop de atualização automática para você poder estudar o gráfico parado sem oscilar
+travar_grafico = st.sidebar.checkbox("🔒 Congelar Gráfico para Estudo / Zoom", value=False)
 
 st.title(f"📊 Gráfico Vivo Smart Money: {ativo_selecionado} [{timeframe_menu}]")
 
@@ -120,18 +123,21 @@ pools_liquidez = [
     {"price": round(preco_mercado - conf["distancia_sup"], conf['decimais'])}
 ]
 
-# --- 4. FRAGMENTO DINÂMICO PARA OSCILAÇÃO CORRIGIDA ---
-@st.fragment(run_every=velocidade)
+# Determina o tempo do loop: se o usuário mandar travar, definimos um tempo longo de 1 hora para parar o pulso
+tempo_atualizacao = 3600 if travar_grafico else velocidade
+
+# --- 4. FRAGMENTO DINÂMICO PARA OSCILAÇÃO COM SUPORTE A ZOOM ---
+@st.fragment(run_every=tempo_atualizacao)
 def renderizar_grafico_pulsante(velas_base):
     velas = list(velas_base)
-    passo = preco_mercado * 0.0001
     
-    segundo_atual = datetime.now().second
-    oscilacao = (passo * 0.4) if segundo_atual % 2 == 0 else -(passo * 0.3)
-    
-    velas[-1]["close"] += oscilacao
-    velas[-1]["high"] = max(velas[-1]["high"], velas[-1]["close"])
-    velas[-1]["low"] = min(velas[-1]["low"], velas[-1]["close"])
+    if not travar_grafico:
+        passo = preco_mercado * 0.0001
+        segundo_atual = datetime.now().second
+        oscilacao = (passo * 0.4) if segundo_atual % 2 == 0 else -(passo * 0.3)
+        velas[-1]["close"] += oscilacao
+        velas[-1]["high"] = max(velas[-1]["high"], velas[-1]["close"])
+        velas[-1]["low"] = min(velas[-1]["low"], velas[-1]["close"])
 
     config_candles = {
         "type": "Candlestick",
@@ -143,7 +149,7 @@ def renderizar_grafico_pulsante(velas_base):
     
     for pool in pools_liquidez:
         cor_linha = "#ef5350" if pool['price'] > preco_mercado else "#26a69a"
-        dados_linha = [{"time": v["time"], "value": pool['price']} for v in velas]
+        dados_linha = [{"time": int(v["time"]), "value": pool['price']} for v in velas]
         lista_series_grafico.append({
             "type": "Line",
             "data": dados_linha,
@@ -164,7 +170,10 @@ def renderizar_grafico_pulsante(velas_base):
         "timeScale": {
             "timeVisible": True,
             "rightOffset": 5, 
-            "barSpacing": 10   
+            "barSpacing": 10,
+            "fixLeftEdge": False,   # Permite movimentação irrestrita para os lados
+            "fixRightEdge": False,
+            "lockVisibleTimeRangeOnResize": True # Mantém o seu zoom travado mesmo atualizando
         },
         "priceScale": {
             "autoScale": True,
@@ -182,6 +191,7 @@ def renderizar_grafico_pulsante(velas_base):
         tipo_pool = "Liquidez de Venda (Stops)" if pool['price'] > preco_mercado else "Liquidez de Compra (Stops)"
         st.write(f"🔹 Nível detectado em: **{pool['price']:.{conf['decimais']}f}** - Tipo: {tipo_pool}")
         
-    renderLightweightCharts(charts=[meu_painel_grafico], key="SMC_CHART_FINAL_FIXED")
+    # Usando uma chave estática para o componente reter as alterações manuais do navegador
+    renderLightweightCharts(charts=[meu_painel_grafico], key="SMC_CHART_STABLE_ZOOM")
 
 renderizar_grafico_pulsante(historico_real)
